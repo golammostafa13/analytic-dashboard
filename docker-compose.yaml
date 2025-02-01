@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15.2-bullseye
+    container_name: postgres_ana
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - TZ=Asia/Dhaka
+    ports:
+      - ${POSTGRES_PORT}:5432
+    volumes:
+      - ./db/postgresql:/var/lib/postgresql
+      - ./db/postgresql_data:/var/lib/postgresql/data
+      - ./database-seed.sql:/docker-entrypoint-initdb.d/database-seed.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'" ]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+    restart: always
+    networks:
+      - app_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    env_file:
+      - .env
+    ports:
+      - "9999:9999"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_network
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "3030:3000" # Map host port 3030 to container port 3000
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:9999
+    depends_on:
+      - backend
+    networks:
+      - app_network
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
