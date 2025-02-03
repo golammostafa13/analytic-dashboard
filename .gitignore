@@ -2,3 +2,8 @@ db
 backend/tmp/
 backend/build-errors.log
 .env
+frontend/node_modules/
+frontend/build
+frontend/.env
+frontend/.env.local
+frontend/.next
