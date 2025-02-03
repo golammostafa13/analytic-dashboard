@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/hupe1980/go-huggingface"
@@ -51,102 +52,56 @@ type QueryResponse struct {
 	GraphTypes []string                 `json:"graph_types"`
 	Error      string                   `json:"error,omitempty"`
 }
+type ChartConfiguration struct {
+	ChartType string        `json:"chartType"`
+	XLabel    string        `json:"xLabel"`
+	YLabel    string        `json:"yLabel"`
+	Labels    []interface{} `json:"labels"`
+	Values    []interface{} `json:"values"`
+	Title     string        `json:"title"`
+	Insights  string        `json:"insights,omitempty"`
+}
 
-// Comprehensive predefined schema
 var databaseSchema = []TableSchema{
 	{
-		Name:        "users",
-		Description: "Stores user account information",
+		Name:        "departments",
+		Description: "Stores department information",
 		Columns: []ColumnSchema{
-			{Name: "id", Type: "bigserial", Nullable: false, Description: "Primary key"},
-			{Name: "email", Type: "varchar(255)", Nullable: false, Description: "User's email address"},
-			{Name: "username", Type: "varchar(50)", Nullable: false, Description: "Username for login"},
-			{Name: "password_hash", Type: "varchar(255)", Nullable: false, Description: "Hashed password"},
-			{Name: "full_name", Type: "varchar(100)", Nullable: false, Description: "User's full name"},
-			{Name: "created_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of account creation"},
-			{Name: "updated_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of last update"},
-			{Name: "last_login", Type: "bigint", Nullable: true, Description: "Unix timestamp of last login"},
-			{Name: "is_active", Type: "boolean", Nullable: false, Description: "Account status"},
-			{Name: "role", Type: "varchar(20)", Nullable: false, Description: "User role (admin, user, etc.)"},
+			{Name: "department_id", Type: "serial", Nullable: false, Description: "Primary key"},
+			{Name: "name", Type: "varchar(100)", Nullable: false, Description: "Department name"},
+			{Name: "location", Type: "varchar(100)", Nullable: false, Description: "Location of the department"},
 		},
 	},
 	{
-		Name:        "products",
-		Description: "Product catalog",
+		Name:        "employees",
+		Description: "Stores employee information",
 		Columns: []ColumnSchema{
-			{Name: "id", Type: "bigserial", Nullable: false, Description: "Primary key"},
-			{Name: "name", Type: "varchar(100)", Nullable: false, Description: "Product name"},
-			{Name: "description", Type: "text", Nullable: true, Description: "Product description"},
-			{Name: "price", Type: "decimal(10,2)", Nullable: false, Description: "Current price"},
-			{Name: "stock", Type: "integer", Nullable: false, Description: "Available stock"},
-			{Name: "category_id", Type: "bigint", Nullable: false, Description: "Reference to categories table"},
-			{Name: "created_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of creation"},
-			{Name: "updated_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of last update"},
-			{Name: "is_active", Type: "boolean", Nullable: false, Description: "Product status"},
+			{Name: "employee_id", Type: "serial", Nullable: false, Description: "Primary key"},
+			{Name: "name", Type: "varchar(100)", Nullable: false, Description: "Employee name"},
+			{Name: "department_id", Type: "int", Nullable: false, Description: "Reference to departments table"},
+			{Name: "hire_date", Type: "date", Nullable: false, Description: "Hire date of the employee"},
+			{Name: "salary", Type: "numeric(10,2)", Nullable: false, Description: "Salary of the employee"},
 		},
 	},
 	{
-		Name:        "categories",
-		Description: "Product categories",
+		Name:        "sales",
+		Description: "Stores sales records",
 		Columns: []ColumnSchema{
-			{Name: "id", Type: "bigserial", Nullable: false, Description: "Primary key"},
-			{Name: "name", Type: "varchar(50)", Nullable: false, Description: "Category name"},
-			{Name: "description", Type: "text", Nullable: true, Description: "Category description"},
-			{Name: "parent_id", Type: "bigint", Nullable: true, Description: "Self-reference for hierarchical categories"},
-			{Name: "created_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of creation"},
-			{Name: "is_active", Type: "boolean", Nullable: false, Description: "Category status"},
+			{Name: "sale_id", Type: "serial", Nullable: false, Description: "Primary key"},
+			{Name: "employee_id", Type: "int", Nullable: false, Description: "Reference to employees table"},
+			{Name: "sale_date", Type: "date", Nullable: false, Description: "Date of the sale"},
+			{Name: "amount", Type: "numeric(10,2)", Nullable: false, Description: "Amount of the sale"},
 		},
 	},
 	{
-		Name:        "orders",
-		Description: "Customer orders",
+		Name:        "projects",
+		Description: "Stores project information",
 		Columns: []ColumnSchema{
-			{Name: "id", Type: "bigserial", Nullable: false, Description: "Primary key"},
-			{Name: "user_id", Type: "bigint", Nullable: false, Description: "Reference to users table"},
-			{Name: "status", Type: "varchar(20)", Nullable: false, Description: "Order status (pending, completed, etc.)"},
-			{Name: "total_amount", Type: "decimal(12,2)", Nullable: false, Description: "Total order amount"},
-			{Name: "created_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of order creation"},
-			{Name: "updated_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of last update"},
-			{Name: "payment_status", Type: "varchar(20)", Nullable: false, Description: "Payment status"},
-		},
-	},
-	{
-		Name:        "order_items",
-		Description: "Individual items within orders",
-		Columns: []ColumnSchema{
-			{Name: "id", Type: "bigserial", Nullable: false, Description: "Primary key"},
-			{Name: "order_id", Type: "bigint", Nullable: false, Description: "Reference to orders table"},
-			{Name: "product_id", Type: "bigint", Nullable: false, Description: "Reference to products table"},
-			{Name: "quantity", Type: "integer", Nullable: false, Description: "Quantity ordered"},
-			{Name: "unit_price", Type: "decimal(10,2)", Nullable: false, Description: "Price at time of order"},
-			{Name: "created_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of creation"},
-		},
-	},
-	{
-		Name:        "reviews",
-		Description: "Product reviews by users",
-		Columns: []ColumnSchema{
-			{Name: "id", Type: "bigserial", Nullable: false, Description: "Primary key"},
-			{Name: "product_id", Type: "bigint", Nullable: false, Description: "Reference to products table"},
-			{Name: "user_id", Type: "bigint", Nullable: false, Description: "Reference to users table"},
-			{Name: "rating", Type: "integer", Nullable: false, Description: "Rating (1-5)"},
-			{Name: "comment", Type: "text", Nullable: true, Description: "Review comment"},
-			{Name: "created_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of creation"},
-			{Name: "updated_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of last update"},
-			{Name: "is_verified", Type: "boolean", Nullable: false, Description: "Verified purchase review"},
-		},
-	},
-	{
-		Name:        "inventory_log",
-		Description: "Product inventory changes log",
-		Columns: []ColumnSchema{
-			{Name: "id", Type: "bigserial", Nullable: false, Description: "Primary key"},
-			{Name: "product_id", Type: "bigint", Nullable: false, Description: "Reference to products table"},
-			{Name: "quantity_change", Type: "integer", Nullable: false, Description: "Change in quantity (positive/negative)"},
-			{Name: "type", Type: "varchar(20)", Nullable: false, Description: "Type of change (restock, order, adjustment)"},
-			{Name: "reference_id", Type: "bigint", Nullable: true, Description: "Reference to related record (order_id etc)"},
-			{Name: "created_at", Type: "bigint", Nullable: false, Description: "Unix timestamp of change"},
-			{Name: "created_by", Type: "bigint", Nullable: false, Description: "Reference to users table"},
+			{Name: "project_id", Type: "serial", Nullable: false, Description: "Primary key"},
+			{Name: "name", Type: "varchar(100)", Nullable: false, Description: "Project name"},
+			{Name: "start_date", Type: "date", Nullable: false, Description: "Start date of the project"},
+			{Name: "end_date", Type: "date", Nullable: false, Description: "End date of the project"},
+			{Name: "budget", Type: "numeric(10,2)", Nullable: false, Description: "Budget for the project"},
 		},
 	},
 }
@@ -206,64 +161,6 @@ func containsIgnoreCase(str, substr string) bool {
 	return len(str) >= len(substr) && (str == substr || containsIgnoreCase(str[1:], substr))
 }
 
-func analyzeDataForGraphs(results []map[string]interface{}) ([]string, error) {
-	// Initialize the Hugging Face client
-	ic := huggingface.NewInferenceClient(os.Getenv("API_KEY"))
-
-	// Convert results to a JSON string for the LLM prompt
-	resultsJSON, err := json.Marshal(results)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal results: %v", err)
-	}
-
-	// Create a prompt for the LLM
-	prompt := fmt.Sprintf(
-		`Analyze the following data and suggest suitable graph types (e.g., Bar Chart, Line Chart, Pie Chart, Scatter Plot, Generic Table). 
-		Return ONLY the graph types as a comma-separated list, no explanations or extra text.
-
-		Data:
-		%s
-
-		Suggested Graph Types:`, resultsJSON,
-	)
-
-	// Prepare the text generation request
-	req := &huggingface.TextGenerationRequest{
-		Inputs: prompt,
-		Parameters: huggingface.TextGenerationParameters{
-			MaxNewTokens:   intPtr(100),     // Limit tokens for concise output
-			Temperature:    float64Ptr(0.4), // Lower for more precise output
-			TopK:           intPtr(50),
-			TopP:           float64Ptr(0.95),
-			ReturnFullText: boolPtr(false),
-		},
-	}
-
-	// Generate the response
-	res, err := ic.TextGeneration(context.Background(), req)
-	if err != nil {
-		return nil, fmt.Errorf("LLM analysis error: %v", err)
-	}
-
-	if len(res) == 0 {
-		return nil, fmt.Errorf("no response from LLM")
-	}
-
-	// Clean up the response
-	graphTypes := strings.TrimSpace(res[0].GeneratedText)
-	graphTypes = strings.TrimPrefix(graphTypes, "```")
-	graphTypes = strings.TrimSuffix(graphTypes, "```")
-	graphTypes = strings.TrimSpace(graphTypes)
-
-	// Split the comma-separated list into a slice
-	graphTypeList := strings.Split(graphTypes, ",")
-	for i := range graphTypeList {
-		graphTypeList[i] = strings.TrimSpace(graphTypeList[i])
-	}
-
-	return graphTypeList, nil
-}
-
 func generateQuery(prompt string) (string, error) {
 	// Initialize the Hugging Face client
 	ic := huggingface.NewInferenceClient(os.Getenv("API_KEY"))
@@ -271,6 +168,7 @@ func generateQuery(prompt string) (string, error) {
 	// Explicitly ask for a single PostgreSQL query
 	req := &huggingface.TextGenerationRequest{
 		Inputs: fmt.Sprintf("Return ONLY the PostgreSQL query, no explanations or extra text:\n\n%s\n\nPostgreSQL Query:\n", prompt),
+		// Model:  os.Getenv("MODEL_ID"),
 		Parameters: huggingface.TextGenerationParameters{
 			MaxNewTokens:   intPtr(500),     // Allow more tokens for complex queries
 			Temperature:    float64Ptr(0.5), // Keep temperature low for accurate SQL
@@ -350,8 +248,8 @@ func refineQueryWithSchema(initialQuery string, schema []TableSchema) (string, e
 
 		Query Requirements:
 		- replace the tables and columns names with database schema.
-		- Ensure proper table relationships and joins.
-		- Handle timestamps as bigint (Unix timestamp).
+		- no explanation or extra text only query.
+		- Should follow the schema for column types and constraints.
 
 		Query:
 		%s
@@ -365,6 +263,7 @@ func refineQueryWithSchema(initialQuery string, schema []TableSchema) (string, e
 	// Prepare the text generation request
 	req := &huggingface.TextGenerationRequest{
 		Inputs: prompt,
+		// Model:  os.Getenv("MODEL_ID"),
 		Parameters: huggingface.TextGenerationParameters{
 			MaxNewTokens:   intPtr(800),     // Increased for complex queries
 			Temperature:    float64Ptr(0.4), // Lower for more precise output
@@ -421,29 +320,27 @@ func refineQueryWithSchema(initialQuery string, schema []TableSchema) (string, e
 
 	return refinedQuery, nil
 }
-
 func getFinalQueryWithRefinedQuery(refinedQuery string) (string, error) {
 	// Initialize the Hugging Face client
 	ic := huggingface.NewInferenceClient(os.Getenv("API_KEY"))
 
-	// Create a prompt for the LLM
+	// Create a very explicit prompt for the LLM
 	prompt := fmt.Sprintf(
-		`Ensure the query is syntactically correct and optimized for execution without any explanation and extra words.
-		Fix syntax errors in my PostgreSQL query where double quotes (\") are incorrectly escaped.
+		`Instruction: Generate ONLY a valid PostgreSQL query based on the following context. 
+NO ADDITIONAL TEXT. NO EXPLANATION. 
+PURE SQL QUERY ONLY:
 
-		Refined Query:
-		%s
-	
-		PostgreSQL Query:`, refinedQuery,
+Context: %s
+QUERY:`, refinedQuery,
 	)
 
 	// Prepare the text generation request
 	req := &huggingface.TextGenerationRequest{
 		Inputs: prompt,
 		Parameters: huggingface.TextGenerationParameters{
-			MaxNewTokens:   intPtr(500),     // Allow more tokens for complex queries
-			Temperature:    float64Ptr(0.5), // Keep temperature low for accurate SQL
-			TopK:           intPtr(50),
+			MaxNewTokens:   intPtr(800),
+			Temperature:    float64Ptr(0.1), // Very low temperature for precision
+			TopK:           intPtr(10),
 			TopP:           float64Ptr(0.9),
 			ReturnFullText: boolPtr(false),
 		},
@@ -459,18 +356,33 @@ func getFinalQueryWithRefinedQuery(refinedQuery string) (string, error) {
 		return "", fmt.Errorf("no response from LLM")
 	}
 
-	// Clean up the response
-	finalQuery := strings.TrimSpace(res[0].GeneratedText)
-	finalQuery = strings.TrimPrefix(finalQuery, "```sql")
-	finalQuery = strings.TrimSuffix(finalQuery, "```")
+	// Extract the query with multiple cleaning strategies
+	generatedText := res[0].GeneratedText
+	var finalQuery string
+
+	// Strategy 1: Direct extraction
+	finalQuery = extractSQLQuery(generatedText)
+
+	// If first strategy fails, try alternative strategies
+	if finalQuery == "" {
+		// Strategy 2: Remove everything before SELECT/INSERT/UPDATE/DELETE/WITH
+		matches := regexp.MustCompile(`(SELECT|INSERT|UPDATE|DELETE|WITH).*`).FindStringSubmatch(generatedText)
+		if len(matches) > 1 {
+			finalQuery = matches[0]
+		}
+	}
+
+	// Final cleaning
 	finalQuery = strings.TrimSpace(finalQuery)
+	finalQuery = strings.Trim(finalQuery, "`;\"'")
+	finalQuery = regexp.MustCompile(`^.*?(\bSELECT\b|\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bWITH\b)`).ReplaceAllString(finalQuery, "$1")
 
 	// Validate the query
 	if finalQuery == "" {
-		return "", fmt.Errorf("generated query is empty")
+		return "", fmt.Errorf("could not extract a valid query from the LLM response")
 	}
 
-	// Ensure the query starts with a valid SQL keyword
+	// Strict validation of query start
 	lowerQuery := strings.ToLower(finalQuery)
 	validPrefixes := []string{"select", "insert", "update", "delete", "with"}
 	isValid := false
@@ -486,6 +398,25 @@ func getFinalQueryWithRefinedQuery(refinedQuery string) (string, error) {
 	}
 
 	return finalQuery, nil
+}
+
+// Helper function to extract SQL query
+func extractSQLQuery(text string) string {
+	// Regular expressions to extract SQL query
+	patterns := []string{
+		`\b(SELECT|INSERT|UPDATE|DELETE|WITH)\s.*?;`,
+		`\b(SELECT|INSERT|UPDATE|DELETE|WITH)\s[^;]*`,
+	}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(text)
+		if len(matches) > 0 {
+			return matches[0]
+		}
+	}
+
+	return ""
 }
 
 func handleGenerateQuery(w http.ResponseWriter, r *http.Request) {
@@ -613,6 +544,20 @@ func handleGenerateQuery(w http.ResponseWriter, r *http.Request) {
 		results = append(results, rowData)
 	}
 
+	chartConfig, err := generateChartConfigurations(results, "Show salary distribution")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Safely access fields
+	fmt.Println(chartConfig.ChartType)
+	fmt.Println(chartConfig.XLabel)
+
+	// Convert to Chart.js format
+	chartJSConfig, options := parseChartConfigToChartJS(chartConfig)
+	// Now you can use chartConfig directly with type safety
+	fmt.Println("Chart Type:", chartConfig.ChartType)
+	fmt.Println("Chart.js Config:", chartJSConfig)
 	// Check for errors after iterating over rows
 	if err := rows.Err(); err != nil {
 		log.Printf("Error after iterating rows: %v", err)
@@ -621,17 +566,14 @@ func handleGenerateQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 5: Analyze data for suitable graph types
-	graphTypes, err := analyzeDataForGraphs(results)
-	if err != nil {
-		log.Printf("Failed to analyze data for graphs: %v", err)
-		http.Error(w, `{"error": "Failed to analyze data for graphs"}`, http.StatusInternalServerError)
-		return
-	}
+	graphTypes, err := []string{"Bar Chart", "Line Chart", "Pie Chart", "Area Chart", "Radar Chart", "Table"}, nil
 
 	// Construct response object
 	response := map[string]interface{}{
-		"data":       results,
-		"graphTypes": graphTypes,
+		"data":          results,
+		"graphTypes":    graphTypes,
+		"chartJSConfig": chartJSConfig,
+		"options":       options,
 	}
 
 	// Step 6: Return response with results and suggested graph types
@@ -644,6 +586,147 @@ func handleGenerateQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error": "Failed to encode results to JSON"}`, http.StatusInternalServerError)
 	}
 
+}
+
+// Optional helper function for parsing
+func parseChartConfigToChartJS(chartConfig *ChartConfiguration) (map[string]interface{}, map[string]interface{}) {
+	chartJSConfig := map[string]interface{}{
+		"labels": chartConfig.Labels,
+		"datasets": []map[string]interface{}{
+			{
+				"label":           chartConfig.YLabel,
+				"data":            chartConfig.Values,
+				"backgroundColor": "rgba(59, 130, 246, 0.5)",
+			},
+		},
+	}
+
+	options := map[string]interface{}{
+		"responsive": true,
+		"plugins": map[string]interface{}{
+			"title": map[string]interface{}{
+				"display": true,
+				"text":    chartConfig.Title,
+			},
+		},
+		"scales": map[string]interface{}{
+			"x": map[string]interface{}{
+				"title": map[string]interface{}{
+					"display": true,
+					"text":    chartConfig.XLabel,
+				},
+			},
+			"y": map[string]interface{}{
+				"title": map[string]interface{}{
+					"display": true,
+					"text":    chartConfig.YLabel,
+				},
+			},
+		},
+	}
+
+	return chartJSConfig, options
+}
+
+func generateChartConfigurations(results []map[string]interface{}, prompt string) (*ChartConfiguration, error) {
+	// Initialize the Hugging Face client
+	ic := huggingface.NewInferenceClient(os.Getenv("API_KEY"))
+
+	// Prepare the input data as a JSON string
+	dataJSON, err := json.Marshal(results)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal input data: %v", err)
+	}
+
+	// Create a detailed prompt for the LLM
+	fullPrompt := fmt.Sprintf(`
+You are a data visualization expert. Given the following JSON data and user prompt, generate a comprehensive chart configuration.
+
+User Prompt: %s
+
+Input Data (JSON): %s
+
+Guidelines for Chart Configuration:
+1. Analyze the data structure and content
+2. Choose the most appropriate chart type
+3. Select meaningful x and y axis data
+4. Create descriptive labels
+5. Provide insights about the data visualization
+
+Return a JSON configuration with these fields:
+- chartType (bar/line/pie/scatter/radar)
+- xLabel (x-axis label)
+- yLabel (y-axis label)
+- labels (x-axis categories)
+- values (y-axis numeric values)
+- title (chart title)
+- insights (optional explanation)
+
+IMPORTANT: Return ONLY a valid JSON matching this structure.`, prompt, string(dataJSON))
+
+	// Prepare the text generation request
+	req := &huggingface.TextGenerationRequest{
+		Inputs: fullPrompt,
+		Parameters: huggingface.TextGenerationParameters{
+			MaxNewTokens:   intPtr(1000),
+			Temperature:    float64Ptr(0.3),
+			TopK:           intPtr(10),
+			TopP:           float64Ptr(0.9),
+			ReturnFullText: boolPtr(false),
+		},
+	}
+
+	// Generate the response
+	res, err := ic.TextGeneration(context.Background(), req)
+	if err != nil {
+		return nil, fmt.Errorf("LLM chart configuration generation error: %v", err)
+	}
+
+	if len(res) == 0 {
+		return nil, fmt.Errorf("no response from LLM")
+	}
+
+	// Extract and clean the JSON response
+	generatedText := res[0].GeneratedText
+	generatedText = strings.TrimSpace(generatedText)
+
+	// Remove any text before the first '{' and after the last '}'
+	jsonStart := strings.Index(generatedText, "{")
+	jsonEnd := strings.LastIndex(generatedText, "}")
+	if jsonStart == -1 || jsonEnd == -1 {
+		return nil, fmt.Errorf("could not extract valid JSON from LLM response")
+	}
+	generatedText = generatedText[jsonStart : jsonEnd+1]
+
+	// Parse the JSON into our structured type
+	var chartConfig ChartConfiguration
+	err = json.Unmarshal([]byte(generatedText), &chartConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse LLM response JSON: %v", err)
+	}
+
+	// Validate the configuration
+	if chartConfig.ChartType == "" || chartConfig.XLabel == "" || chartConfig.YLabel == "" {
+		return nil, fmt.Errorf("invalid chart configuration: missing required fields")
+	}
+
+	return &chartConfig, nil
+}
+
+// Helper function to safely convert interface{} to []interface{}
+func convertToSlice(v interface{}) ([]interface{}, error) {
+	switch typed := v.(type) {
+	case []interface{}:
+		return typed, nil
+	case []map[string]interface{}:
+		result := make([]interface{}, len(typed))
+		for i, item := range typed {
+			result[i] = item
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("cannot convert %T to slice", v)
+	}
 }
 
 func main() {
